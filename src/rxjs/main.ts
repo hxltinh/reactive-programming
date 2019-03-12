@@ -1,12 +1,12 @@
-import { FRAME_HEIGHT, FRAME_WIDTH, SNAKE_SIZE, GAME_SPEED, INITIAL_SNAKE_LENGTH } from '../config';
-import { Direction, calculateDirection } from '../direction';
+import { FRAME_HEIGHT, FRAME_WIDTH, GAME_SPEED, INITIAL_SNAKE_LENGTH, SNAKE_SIZE } from '../config';
+import { calculateDirection, Direction } from '../direction';
 
-import { fromEvent, interval, BehaviorSubject, merge, EMPTY, combineLatest } from 'rxjs';
-import { 
-    map, startWith, scan, distinctUntilChanged, withLatestFrom, skip, tap, switchMapTo, share, takeWhile
+import { BehaviorSubject, combineLatest, EMPTY, fromEvent, interval, merge } from 'rxjs';
+import {
+    distinctUntilChanged, map, scan, share, skip, startWith, switchMapTo, takeWhile, tap, withLatestFrom,
 } from 'rxjs/operators';
-import { drawSnake, drawPizza, clearFrame } from '../shapes';
-import { ISnakeState, IPoint, checkCollision, moveSnakeHead, generateSnake } from '../utils';
+import { clearFrame, drawPizza, drawSnake } from '../shapes';
+import { checkCollision, generateSnake, IPoint, ISnakeState, moveSnakeHead, SnakePoints } from '../utils';
 
 class Main {
     private canvas: HTMLCanvasElement;
@@ -21,7 +21,7 @@ class Main {
 
         const ctx = this.canvas.getContext('2d');
         if (!ctx) {
-            throw new Error('no canvas implemented');
+            throw new Error('get 2d context fails');
         }
         this.ctx = ctx;
     }
@@ -35,9 +35,8 @@ class Main {
         const tick$ = interval(GAME_SPEED);
 
         const snakeLength$ = new BehaviorSubject(INITIAL_SNAKE_LENGTH);
-
         const snakeGainLength$ = snakeLength$.pipe(
-            scan((length, gain) => length + gain),
+            scan(sumUp),
         );
 
         const keyboardInput$ = fromEvent<KeyboardEvent>(document, 'keydown');
@@ -52,12 +51,12 @@ class Main {
         const snakeGoesHunt$ = tick$.pipe(
             withLatestFrom(direction$, snakeGainLength$),
             map(([_, direction, snakeLength]) => ({ direction, snakeLength })),
-            scan<ISnakeState, IPoint[]>(snakeIsMoving, generateSnake()),
+            scan<ISnakeState, SnakePoints>(snakeIsMoving, generateSnake()),
             share(),
         );
 
         const pizza$ = snakeGoesHunt$.pipe(
-            scan<IPoint[], IPoint>(renewPizzaPosition, generatePizza()),
+            scan<SnakePoints, IPoint>(renewPizzaPosition, generatePizza()),
             distinctUntilChanged(),
             share(),
         );
@@ -77,18 +76,22 @@ class Main {
 
         main$.subscribe(([snakePoints, pizzaPoint]) => {
             clearFrame(this.ctx);
-            snakePoints.forEach(({x, y}) => drawSnake(this.ctx, x, y));
+            snakePoints.forEach(({ x, y }) => drawSnake(this.ctx, x, y));
             drawPizza(this.ctx, pizzaPoint.x, pizzaPoint.y);
         });
     }
 }
 
+function sumUp(length: number, gain: number) {
+    return length + gain;
+}
+
 const horizontalLimit = FRAME_WIDTH / SNAKE_SIZE;
 const verticalLimit = FRAME_HEIGHT / SNAKE_SIZE;
-function checkIfStopGame(snakePoints: IPoint[]) {
+function checkIfStopGame(snakePoints: SnakePoints) {
     const [head, ...tail] = snakePoints;
 
-    const snakeEatsItSelf = tail.some(part => checkCollision(part, head));
+    const snakeEatsItSelf = tail.some((part) => checkCollision(part, head));
 
     const isOutOfBorder = (head.x < 0 || head.x >= horizontalLimit)
         || (head.y < 0 || head.y >= verticalLimit);
@@ -106,7 +109,7 @@ function accumulateDirection(acc: number, next: Direction) {
     return direction;
 }
 
-function snakeIsMoving(snakePoints: IPoint[], snakeState: ISnakeState) {
+function snakeIsMoving(snakePoints: SnakePoints, snakeState: ISnakeState) {
     const { direction, snakeLength } = snakeState;
 
     const movedSnakeHead = moveSnakeHead(snakePoints[0], direction);
@@ -137,7 +140,7 @@ export function generatePizza() {
     return randomPosition;
 }
 
-export function getRandomPosition(snake: IPoint[] = []): (() => void) | IPoint {
+export function getRandomPosition(snake: SnakePoints = []): (() => void) | IPoint {
     const position = {
         x: getRandomNumber(),
         y: getRandomNumber(),
@@ -150,10 +153,10 @@ export function getRandomPosition(snake: IPoint[] = []): (() => void) | IPoint {
     return getRandomPosition(snake);
 }
 
-function renewPizzaPosition(pizza: IPoint, snakePoints: IPoint[]) {
+function renewPizzaPosition(pizza: IPoint, snakePoints: SnakePoints) {
     const head = snakePoints[0];
 
-    if ( checkCollision( pizza, head ) ) {
+    if (checkCollision(pizza, head)) {
         const randomPosition = getRandomPosition(snakePoints);
         if (typeof randomPosition === 'function') { return pizza; }
         return randomPosition;
@@ -162,8 +165,8 @@ function renewPizzaPosition(pizza: IPoint, snakePoints: IPoint[]) {
     return pizza;
 }
 
-function isEmptyCell( position: IPoint, snake: IPoint[] ) {
-    return !snake.some( segment => checkCollision( segment, position ) );
+function isEmptyCell(position: IPoint, snake: SnakePoints) {
+    return !snake.some((segment) => checkCollision(segment, position));
 }
 
 function getRandomNumber() {
